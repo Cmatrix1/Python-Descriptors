@@ -195,7 +195,7 @@ l1.current_time
 ```
 
 
-very often, we choose to:
+### very often, we choose to:
 - return the descriptor (TimeUTC) instance when called from class itself (Logger class) gives us an easy handle to the descriptor instance
 - return the attribute value when called from an instance of the class
 
@@ -210,4 +210,95 @@ class TimeUTC:
         else:
             # called from instance
             return datetime.utcnow().isoformat()
+
+class Logger:
+    current_time = TimeUTC()
+
+Logger.current_time
+'<__main__.TimeUTC at 0x26bf41df350>'
+
+l = Logger()
+l.current_time
+'2023-10-27T09:58:00.644233'
 ```
+
+This is consistent with the way properties work:
+```python
+class Logger:
+    @property
+    def current_time(self):
+        return datetime.utcnow().isoformat()
+
+Logger.current_time
+'<property at 0x26bf420c950>'
+```
+
+This returned the property instance, whereas calling it from an instance:
+```python
+l = Logger()
+l.current_time
+'2023-10-27T09:58:00.661615'
+```
+
+#### Now, there is one subtle point we have to understand when we create multiple instances of a class that uses a descriptor as a class attribute.
+Since the descriptor is assigned to an **class attribute**, all instances of the class will **share** the same descriptor instance!
+
+```python
+class TimeUTC:
+    def __get__(self, instance, owner_class):
+        if instance is None:
+            # called from class
+            return self
+        else:
+            # called from instance
+            print(f'__get__ called in {self}')
+            return datetime.utcnow().isoformat()
+        
+class Logger:
+    current_time = TimeUTC()
+
+l1 = Logger()
+l2 = Logger()
+```
+But look at the `current_time` for each of those instances
+
+```python
+l1.current_time is l2.current_time
+> True
+```
+
+As you can see the **same** instance of `TimeUTC` was used.
+This does not matter in this particular example, since we just return the current time, but watch what happens if our property relies on some kind of state in the descriptor:
+
+```python
+class Countdown:
+    def __init__(self, start):
+        self.start = start + 1
+        
+    def __get__(self, instance, owner):
+        if instance is None:
+            return self
+        else:
+            self.start -= 1
+            return self.start
+
+class Rocket:
+    countdown = Countdown(10)
+```
+Now let's say we want to launch two rockets:
+
+```
+rocket1 = Rocket()
+rocket2 = Rocket()
+```
+And let's start the countdown for each one:
+```python
+rocket1.countdown
+> 10
+rocket2.countdown
+> 9
+rocket1.countdown
+> 8
+```
+
+As you can see, the current countdown value is shared by both `rocket1` and `rocket2` instances of `Rocket` - this is because the `Countdown` instance is a class attribute of `Rocket`. So we have to be careful how we deal with instance level state.
