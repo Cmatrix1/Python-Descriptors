@@ -157,6 +157,7 @@ class Dice:
 
 ## Getters and Setters
 
+### Getters
 So far we have seen how the `__get__` method is called when we assign an instance of a descriptors to a class attribute.
 But we can access that attribute either from the class itself, or the instance - as we saw in the last lecture, both accesses end up calling the `__get__` method.
 So, when __get__ is called, we may want to know:
@@ -302,3 +303,109 @@ rocket1.countdown
 ```
 
 As you can see, the current countdown value is shared by both `rocket1` and `rocket2` instances of `Rocket` - this is because the `Countdown` instance is a class attribute of `Rocket`. So we have to be careful how we deal with instance level state.
+
+
+### Setters
+The `__set__` method works in a similar way to `__get__` but it is used when we assign a value to the class attribute.
+`__set__` signature is as follows: self, instance, value
+- instance: the instance the __set__ method was called from
+- value: the value we want to assign to the attribute
+
+You'll notice there is no owner_class like we have in the `__get__` method
+setters (and deleters) are always called from instances
+
+```python
+class IntegerValue:
+    def __set__(self, instance, value):
+        print(f'__set__ called, instance={instance}, value={value}')
+        
+    def __get__(self, instance, owner_class):
+        if instance is None:
+            print('__get__ called from class')
+        else:
+            print(f'__get__ called, instance={instance}, owner_class={owner_class}')
+
+class Point2D:
+    x = IntegerValue()
+    y = IntegerValue()
+
+p = Point2D()
+p.x = 100
+> '__set__ called, instance=<__main__.Point2D object at 0x000001E7564084D0>, value=100'
+```
+
+## Caveat with Set and Delete (and Get)
+Notice that we have only created a single instance of the `TimeUTC` descriptor:
+```python
+class Logger:
+current_time = TimeUTC()
+```
+So what happens when we do this?
+```python
+l1 = Logger()
+l2 = Logger()
+```
+Any instance of `Logger` will be referencing the same instance of `TimeUTC` in this case it does not matter because `__get__` just returns the current UTC time
+But what happens when we have to "store" and "retrieve" data from the instances?
+Suppose `IntegerValue` is a data descriptor ->  implements `__get__` and `__set__` methods
+```python
+class Point2D:
+    x = IntegerValue()
+    y = IntegerValue()
+# two separate instances of IntegerValue assigned to the class attributes x and y
+
+p1 = Point2D()
+p2 = Point2D()
+# two separate instances of Point2D
+```
+But what object does p1.x reference? -> the class attribute x
+what about p2.x? -> the same class attribute x (the same instance of IntegerValue)
+
+ we have to be mindful of which instance we are "storing" the data for
+this is one of the reasons both __get__ and __set__ need to know the **instance**
+
+## Storing
+So, where should we store the values `x` and `y` in the previous example? 
+
+### Approach 1
+Many "tutorials" I see on the web naively store the value in the descriptor itself:
+```python
+class IntegerValue:
+    def __set__(self, instance, value):
+        self._value = int(value)
+        
+    def __get__(self, instance, owner_class):
+        if instance is None:
+            return self
+        else:
+            return self._value
+
+class Point2D:
+    x = IntegerValue()
+    y = IntegerValue()
+```
+At first blush, this seems to work just fine:
+```python
+p1 = Point2D()
+p2 = Point2D()
+
+p1.x = 1.1
+p1.y = 2.2
+
+print(p1.x, p1.y)
+> (1, 2)
+```
+But, remember the point I was making about the instance of the descriptor (`IntegeraValue` in this case) being shared by all instances of the class (`Point2D` in this case)?
+```python
+p2 = Point2D()
+print(p2.x, p2.y)
+> (1, 2)
+```
+And of course if we set the value:
+```python
+p2.x = 100.9
+print(p2.x, p1.x)
+> (100, 100)
+```
+So, obviously using the descriptor instance dictionary for storage at the instance level is probably not going to work in most cases!
+And this is the reason both the `__get__` and `__set__` methods need to know which instance we are dealing with.
