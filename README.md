@@ -405,7 +405,114 @@ And of course if we set the value:
 ```python
 p2.x = 100.9
 print(p2.x, p1.x)
+
 > (100, 100)
 ```
 So, obviously using the descriptor instance dictionary for storage at the instance level is probably not going to work in most cases!
 And this is the reason both the `__get__` and `__set__` methods need to know which instance we are dealing with.
+
+### Approach 2
+We are going to **Assuming** that the `instance` is a hashable object, and use a dictionary in the descriptor to store instance specific values.
+```python
+class IntegerValue:
+    def __init__(self):
+        self.values = {}
+        
+    def __set__(self, instance, value):
+        self.values[instance] = int(value)
+        
+    def __get__(self, instance, owner_class):
+        if instance is None:
+            return self
+        else:
+            return self.values.get(instance)
+```
+
+```python
+class Point2D:
+    x = IntegerValue()
+    y = IntegerValue()
+
+p1 = Point2D()
+
+p1.x = 10.1
+p1.y = 20.2
+
+p1.x, p1.y
+> (10, 20)
+```
+In fact, we can see the dictionary in the descriptor instances:
+```python
+Point2D.x.values
+> {<__main__.Point2D at 0x212d93d9710>: 10}
+Point2D.y.values
+> {<__main__.Point2D at 0x212d93c2110>: 20}
+
+```
+where the key in both of these is our `p1` object
+We can now create a second point, and go through the same steps:
+```python
+p2 = Point2D()
+p2.x = 100.1
+p2.y = 200.2
+
+Point2D.x.values
+> {<__main__.Point2D at 0x212d93b2290>: 10,
+> <__main__.Point2D at 0x212d931c8d0>: 100}
+
+Point2D.y.values
+> {<__main__.Point2D at 0x212d93b2290>: 20,
+> <__main__.Point2D at 0x212d931c8d0>: 200}
+```
+And everything works just fine ( Or does it?? ):
+```bash
+p1.x, p1.y, p2.x, p2.y
+> (10, 20, 100, 200)
+```
+We actually have a potential memory leak - notice how the dictionary in the desccriptor instance is **also** storing a reference to the point object - as a **key** in the dictionary.
+
+---
+Let's write a simple utility function that allows us to get the reference count for an object given it's id (and it only makes sense if the id we use still has a valid non-destroyed object):
+```python
+import ctypes
+
+def ref_count(address):
+    return ctypes.c_long.from_address(address).value
+
+p1 = Point2D()
+id_p1 = id(p1)
+
+ref_count(id_p1)
+> 1
+```
+Now let's set the `x` property of `p1`:
+```python
+p1.x = 100.1
+```
+And let's check the ref count again:
+```python
+ref_count(id_p1)
+> 2
+```
+As you can see it's now `2`. if we delete our main reference to `p1` that is in our global namespace:
+```python
+'p1' in globals()
+> True
+del p1
+'p1' in globals()
+> False
+ref_count(id_p1)
+> 1
+```
+And our reference count is still `1`, which means the object itself has not been destroyed!
+In fact, we can see that object referenced in our data descriptor dictionary:
+```python
+Point2D.x.values.items()
+> dict_items([(<__main__.Point2D object at 0x00000212D93B2290>, 10), (<__main__.Point2D object at 0x00000212D931C8D0>, 100), (<__main__.Point2D object at 0x00000212D9390150>, 100)])
+```
+As you can see, the last element's key is the same id as what `p1` was referencing.
+So, although we deleted `p1`, the object was not destroyed - this can result in a memory leak.
+There are a few ways we can handle this issue. The first one we are going to look at is something called **weak references**. So let's segway into that next.
+
+
+
