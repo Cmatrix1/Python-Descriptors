@@ -512,7 +512,88 @@ Point2D.x.values.items()
 ```
 As you can see, the last element's key is the same id as what `p1` was referencing.
 So, although we deleted `p1`, the object was not destroyed - this can result in a memory leak.
-There are a few ways we can handle this issue. The first one we are going to look at is something called **weak references**. So let's segway into that next.
+There are a few ways we can handle this issue. The first one we are going to look at is something called [**weak references**](https://t.me/Pythonic_Dev/300) . So let's segway into that next.
 
+### Approach 3
+First let's bring back the function we can use to determine the reference count of an object by id:
+```python
+import ctypes
 
+def ref_count(address):
+    return ctypes.c_long.from_address(address).value
+```
+Note that this counts the **strong** references to that object.
+```python
+class Person:
+    def __init__(self, name):
+        self.name = name
+        
+    def __repr__(self):
+        return f'Person(name={self.name})'
+
+p1 = Person('Guido')
+p2 = p1
+
+p1_id == p2_id, ref_count(p1_id)
+> (True, 2)
+```
+So we have two strong references. If we delete one of them:
+```python
+del p2
+ref_count(p1_id)
+> 1
+```
+We have a strong reference count of `1` now
+
+We can delete the last reference:
+```python
+del p1
+```
+Now our reference count function will not work anymore, since the last reference to the object at that mempry address was removed and that memory address is now meaningless:
+```python
+ref_count(p1_id)
+> -370994432650002694
+```
+The garbage collector will destroy any object whose **strong** reference count goes down to `0`.
+So far, we have always worked with strong references But There is another type of reference to an object that we can use that **does not** affect the (strong) reference count - these are called **weak references**.
+[WeakRef Doc](https://docs.python.org/3/library/weakref.html)
+
+For our data descriptors, we want to use the instance objects as keys in our dictionary. But as we saw earlier, storing the object itself as the key can lead to memory leaks. So instead, we are going to store weak references to the object in the dictionary.
+We could use our own dictionary, but `weakref` also provides a specialized dictionary type, that will store a weak reference to the object being used as the key:
+
+```python
+p1 = Person('Guido')
+d = weakref.WeakKeyDictionary()
+
+ref_count(id(p1))
+> 1
+
+weakref.getweakrefcount(p1)
+> 0
+
+d[p1] = 'Guido'
+```
+Now, notice the reference counts:
+```python
+ref_count(id(p1)), weakref.getweakrefcount(p1)
+> (1, 1)
+```
+We still have only one strong reference, but now we have a weak reference to `p1` as well! That weak reference is in the `WeakKeyDictionary`.
+We can easily see the weak references contained in that dictionary:
+```python
+hex(id(p1)), list(d.keyrefs())
+> ('0x7fbae83635c0', [<weakref at 0x7fbae8381958; to 'Person' at 0x7fbae83635c0>])
+```
+Now watch what happens to the dictionary when we delete the last strong reference to `p1`:
+```python
+del p1
+list(d.keyrefs())
+> []
+```
+It was automatically removed when the object it was pointing to (weakly) was destroyed by the garbage collector!
+Now be careful, you can only use keys in the `WeakKeyDictionary` that Python can create weak references to
+Also, even though we are using a weak reference as a key in the dictionary, the object must still be **hashable**.
+
+So we can certainly use `WeakKeyDictionary` objects in our data descriptors, but that will only work with hashable objects.
+Let's look at how to use `WeakKeyDictionary` as a storage mechanism for our data descriptors, as well as how to deal with the unhashable issue.
 
